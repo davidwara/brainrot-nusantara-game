@@ -70,10 +70,10 @@ function BrainrotFactory.build(def, mutation): Model
 
 	local model = Instance.new("Model")
 	model.Name = def.Id
+	local height = def.Height
 	-- The model's height, so place() can put its feet on a surface.
 	model:SetAttribute("Height", height)
 
-	local height = def.Height
 	local body = Instance.new("Part")
 	body.Name = "Body"
 	body.Shape = Enum.PartType.Block

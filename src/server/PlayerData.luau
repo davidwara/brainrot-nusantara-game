@@ -3,7 +3,6 @@
 -- MoneyChanged remote. Income ticks once a second from every brainrot that
 -- stands on the player's base.
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")

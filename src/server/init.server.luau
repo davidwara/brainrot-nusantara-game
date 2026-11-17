@@ -12,7 +12,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Brainrots = require(Shared:WaitForChild("Brainrots"))
 local Config = require(Shared:WaitForChild("Config"))
 
 local Conveyor = require(script.Parent:WaitForChild("Conveyor"))
