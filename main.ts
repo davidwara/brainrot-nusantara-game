@@ -1,3 +1,12 @@
+// Brainrot Nusantara — a make.fun roblox-brainrot-01 entry (built 17 Nov 2026).
+// A 3D brainrot game: 18 original Indonesian characters walk the conveyor,
+// players buy them onto their base, money ticks up every second, and Tsunami
+// Cendol + Maling Brainrot keep everyone running home. This program hands the
+// entry in: it copies game.rbxl, src/, screenshots/ and PLAY.json from beside
+// this file to /output and writes /output/dossier.json with the vendored
+// make.fun library. Publish is still pending (no Roblox account access yet),
+// so PLAY.json still names place 0 — everything else is ready to submit.
+//
 // A working roblox-brainrot-01 entry (Node 22, standard library only): the game is this directory's Rojo
 // project, built into game.rbxl with `rojo build default.project.json --output game.rbxl`, and the program
 // hands it in. It copies game.rbxl, src/, screenshots/ and PLAY.json from beside this file to /output and
