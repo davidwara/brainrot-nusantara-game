@@ -109,6 +109,43 @@ jobs:
           $studioDir >> $env:GITHUB_PATH
           Write-Host "Studio dari zip SIAP."
 
+      - name: Cek cookie valid
+        if: inputs.mode == 'studio-zip'
+        shell: pwsh
+        env:
+          ROBLOSECURITY: ${{ secrets.ROBLOSECURITY }}
+        run: |
+          $resp = curl.exe -s --max-time 20 -w "`nHTTP:%{http_code}" -H "Cookie: .ROBLOSECURITY=$env:ROBLOSECURITY" "https://users.roblox.com/v1/users/authenticated"
+          Write-Host $resp
+          if ($resp -match "HTTP:401") { Write-Error "Cookie TIDAK VALID (401) — butuh cookie baru dari user"; exit 1 }
+          if ($resp -match "HTTP:200") { Write-Host "Cookie VALID." }
+
+      - name: Pre-warm Studio
+        if: inputs.mode == 'studio-zip'
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { Write-Error "RobloxStudioBeta.exe tidak ditemukan"; exit 1 }
+          $place = Join-Path $env:GITHUB_WORKSPACE "game.rbxl"
+          $proc = Start-Process -FilePath $exe.FullName -ArgumentList $place -PassThru
+          Write-Host "Pre-warm Studio pid=$($proc.Id)"
+          Start-Sleep -Seconds 60
+          $alive = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+          Write-Host "Studio masih jalan setelah 60 dtk: $($null -ne $alive)"
+          $logDir = Join-Path $env:LOCALAPPDATA "Roblox\logs"
+          $latest = Get-ChildItem $logDir -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($latest) {
+            Write-Host "Log terbaru: $($latest.Name)"
+            Get-Content $latest.FullName -Tail 30 | ForEach-Object { Write-Host $_ }
+          } else {
+            Write-Host "Tidak ada file log Studio di $logDir"
+          }
+          if ($alive) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; Write-Host "Pre-warm Studio dimatikan." }
+          Start-Sleep -Seconds 5
+          $still = Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue
+          Write-Host "Studio masih ada setelah kill: $($null -ne $still)"
+
       - name: Diagnostik installer Studio (tanpa cookie)
         if: inputs.mode == 'diag'
         shell: pwsh
