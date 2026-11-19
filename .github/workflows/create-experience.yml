@@ -24,9 +24,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "test = smoke test tanpa auth (cookie dummy); create = buat experience (butuh secrets.ROBLOSECURITY)"
+        description: "test = smoke test tanpa auth (cookie dummy); create = buat experience (butuh secrets.ROBLOSECURITY); diag = diagnosa installer Studio tanpa cookie"
         type: choice
-        options: [test, create]
+        options: [test, create, diag]
         default: test
       place_name:
         description: "Nama experience yang dibuat (mode create)"
@@ -61,18 +61,49 @@ jobs:
           Write-Host "ROBLOSECURITY secret terisi (nilai tidak dicetak)."
 
       - name: Install Roblox Studio
+        if: inputs.mode != 'diag'
         uses: OrbitalOwen/roblox-win-installer-action@1.1
         timeout-minutes: 20
         with:
           cookie: ${{ inputs.mode == 'create' && secrets.ROBLOSECURITY || 'DUMMY_COOKIE_FOR_MECHANICS_TEST' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Diagnostik installer Studio (tanpa cookie)
+        if: inputs.mode == 'diag'
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          Invoke-WebRequest -Uri "http://setup.roblox.com/RobloxStudioLauncherBeta.exe" -OutFile RobloxStudioLauncherBeta.exe
+          $proc = Start-Process -FilePath ".\RobloxStudioLauncherBeta.exe" -PassThru
+          Write-Host "launcher pid=$($proc.Id)"
+          $deadline = (Get-Date).AddMinutes(12)
+          $found = $false
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 30
+            $studio = Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue
+            $launcher = Get-Process RobloxStudioLauncherBeta -ErrorAction SilentlyContinue
+            $versions = @(Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+            Write-Host "t=$((Get-Date).ToString('HH:mm:ss')) studio=$($null -ne $studio) launcher=$($null -ne $launcher) versions=[$($versions -join ',')]"
+            if ($studio) { $found = $true; break }
+          }
+          if (-not $found) {
+            Write-Host "=== DIAGNOSTIK AKHIR ==="
+            Get-Process Roblox* -ErrorAction SilentlyContinue | Format-Table Name, Id | Out-String | Write-Host
+            Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions\*\RobloxStudioBeta.exe" -ErrorAction SilentlyContinue | Select-Object FullName | Format-Table | Out-String | Write-Host
+            Write-Error "RobloxStudioBeta.exe TIDAK MUNCUL dalam 12 menit tanpa cookie — launcher sendiri yang bermasalah"
+            exit 1
+          }
+          Write-Host "STUDIO MUNCUL — launcher jalan tanpa cookie, berarti tulis registry cookie yang merusak startup"
+          Stop-Process -Name RobloxStudioBeta -Force -ErrorAction SilentlyContinue
+
       - name: Install run-in-roblox via Foreman
+        if: inputs.mode != 'diag'
         uses: rojo-rbx/setup-foreman@v1.0.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run script in headless Studio
+        if: inputs.mode != 'diag'
         shell: pwsh
         timeout-minutes: 20
         run: |
