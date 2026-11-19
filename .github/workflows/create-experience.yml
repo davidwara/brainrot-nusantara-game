@@ -30,9 +30,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "test = smoke test tanpa auth (cookie dummy); create = buat experience (butuh secrets.ROBLOSECURITY); diag = diagnosa installer Studio tanpa cookie; api-create = buat experience via endpoint web api.roblox.com/universes/create (butuh secrets.ROBLOSECURITY)"
+        description: "test = smoke test tanpa auth (cookie dummy); create = buat experience (butuh secrets.ROBLOSECURITY); diag = diagnosa installer Studio tanpa cookie; api-create = buat experience via endpoint web api.roblox.com/universes/create (butuh secrets.ROBLOSECURITY); studio-zip = buat experience via Studio dari zip langsung, tanpa launcher (butuh secrets.ROBLOSECURITY)"
         type: choice
-        options: [test, create, diag, api-create]
+        options: [test, create, diag, api-create, studio-zip]
         default: test
       place_name:
         description: "Nama experience yang dibuat (mode create)"
@@ -58,7 +58,7 @@ jobs:
           ref: plan-c/create-experience
 
       - name: Fail fast kalau mode=create tapi secret kosong
-        if: inputs.mode == 'create'
+        if: inputs.mode == 'create' || inputs.mode == 'studio-zip'
         shell: pwsh
         run: |
           if ("${{ secrets.ROBLOSECURITY }}" -eq "") {
@@ -68,12 +68,46 @@ jobs:
           Write-Host "ROBLOSECURITY secret terisi (nilai tidak dicetak)."
 
       - name: Install Roblox Studio
-        if: inputs.mode != 'diag'
+        if: inputs.mode != 'diag' && inputs.mode != 'studio-zip'
         uses: OrbitalOwen/roblox-win-installer-action@1.1
         timeout-minutes: 20
         with:
           cookie: ${{ inputs.mode == 'create' && secrets.ROBLOSECURITY || 'DUMMY_COOKIE_FOR_MECHANICS_TEST' }}
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Studio dari zip (tanpa launcher)
+        if: inputs.mode == 'studio-zip'
+        shell: pwsh
+        timeout-minutes: 20
+        env:
+          ROBLOSECURITY: ${{ secrets.ROBLOSECURITY }}
+        run: |
+          $version = (Invoke-WebRequest -Uri "https://setup.roblox.com/versionQTStudio" -UseBasicParsing).Content.Trim()
+          if (-not $version) { Write-Error "versionQTStudio kosong — setup.roblox.com tidak merespons"; exit 1 }
+          Write-Host "Studio version: $version"
+          Invoke-WebRequest -Uri "https://setup.roblox.com/$version-RobloxStudio.zip" -OutFile studio.zip
+          $dest = "$env:LOCALAPPDATA\Roblox\Versions\$version"
+          Expand-Archive studio.zip -DestinationPath $dest -Force
+          $studioExe = Get-ChildItem $dest -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $studioExe) { Write-Error "RobloxStudioBeta.exe tidak ditemukan setelah extract"; exit 1 }
+          Write-Host "Studio exe: $($studioExe.FullName)"
+          $cookie = $env:ROBLOSECURITY
+          $key = "SEC::<YES>,EXP::<9999-01-01T00:00:00Z>,COOK::<$cookie>"
+          $regPath = "HKCU:\Software\Roblox\RobloxStudioBrowser\roblox.com"
+          if (-not (Test-Path $regPath)) { New-Item -Path $regPath -Force | Out-Null }
+          Set-ItemProperty -Path $regPath -Name ".ROBLOSECURITY" -Value $key
+          Write-Host "Cookie ditulis ke registry (panjang nilai: $($key.Length))"
+          $contentFolder = (Split-Path $studioExe.FullName -Parent) + "\content/"
+          $regStudio = "HKCU:\Software\Roblox\RobloxStudio"
+          if (-not (Test-Path $regStudio)) { New-Item -Path $regStudio -Force | Out-Null }
+          Set-ItemProperty -Path $regStudio -Name "ContentFolder" -Value $contentFolder
+          $pluginsDir = Join-Path $env:LOCALAPPDATA "Roblox\Plugins"
+          if (-not (Test-Path $pluginsDir)) { New-Item -Path $pluginsDir -ItemType Directory -Force | Out-Null }
+          $autoSaves = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "ROBLOX\AutoSaves"
+          if (Test-Path $autoSaves) { Remove-Item $autoSaves -Recurse -Force }
+          $studioDir = Split-Path $studioExe.FullName -Parent
+          $studioDir >> $env:GITHUB_PATH
+          Write-Host "Studio dari zip SIAP."
 
       - name: Diagnostik installer Studio (tanpa cookie)
         if: inputs.mode == 'diag'
@@ -115,7 +149,7 @@ jobs:
         timeout-minutes: 20
         run: |
           $ErrorActionPreference = "Continue"
-          if ("${{ inputs.mode }}" -eq "create") {
+          if ("${{ inputs.mode }}" -eq "create" -or "${{ inputs.mode }}" -eq "studio-zip") {
             $env:PLAN_C_PLACE_NAME = "${{ inputs.place_name }}"
             $env:PLAN_C_TEMPLATE_ID = "${{ inputs.template_place_id }}"
             run-in-roblox --script ci/create-place.lua *> run.log
@@ -147,7 +181,7 @@ jobs:
           smoke_ok=$smoke
           "@ | Out-File -FilePath place-ids.txt -Encoding utf8
           Get-Content place-ids.txt
-          if ("${{ inputs.mode }}" -eq "create" -and $place -eq "") {
+          if (("${{ inputs.mode }}" -eq "create" -or "${{ inputs.mode }}" -eq "studio-zip") -and $place -eq "") {
             Write-Error "Mode create tapi BRAINROT_PLACE_ID tidak ditemukan di log — CreatePlaceAsync gagal. Lihat run.log."
             exit 1
           }
