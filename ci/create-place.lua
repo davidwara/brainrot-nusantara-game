@@ -1,5 +1,6 @@
 -- ci/create-place.lua — Plan C: buat experience "Brainrot Nusantara" dari headless Studio.
--- Dijalankan via: run-in-roblox --script ci/create-place.lua
+-- Dijalankan via: run-in-roblox --place game.rbxl --script ci/create-place.lua
+-- (run-in-roblox 0.3.0 WAJIB --place; tanpa itu panic "not implemented" di main.rs:54.)
 -- Input lewat environment (diset workflow): PLAN_C_PLACE_NAME, PLAN_C_TEMPLATE_ID.
 -- Output (dicetak ke stdout, di-grep workflow): BRAINROT_PLACE_ID=<n> dan
 -- BRAINROT_UNIVERSE_ID=<n> (bila lookup HTTP berhasil). Parent juga bisa resolve

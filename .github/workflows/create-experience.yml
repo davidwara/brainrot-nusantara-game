@@ -152,9 +152,9 @@ jobs:
           if ("${{ inputs.mode }}" -eq "create" -or "${{ inputs.mode }}" -eq "studio-zip") {
             $env:PLAN_C_PLACE_NAME = "${{ inputs.place_name }}"
             $env:PLAN_C_TEMPLATE_ID = "${{ inputs.template_place_id }}"
-            run-in-roblox --script ci/create-place.lua *> run.log
+            run-in-roblox --place game.rbxl --script ci/create-place.lua *> run.log
           } else {
-            run-in-roblox --script ci/smoke-test.lua *> run.log
+            run-in-roblox --place game.rbxl --script ci/smoke-test.lua *> run.log
           }
           $code = $LASTEXITCODE
           Get-Content run.log
