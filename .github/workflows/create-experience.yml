@@ -11,6 +11,12 @@ name: Plan C — Create Experience (headless Studio)
 #   create — membuat experience "Brainrot Nusantara" (atau sesuai input). WAJIB repo secret
 #            ROBLOSECURITY berisi .ROBLOSECURITY cookie akun BorneoBrainrot. Cookie TIDAK
 #            PERNAH ditulis ke log/repo — hanya dibaca action installer dari secrets.
+#   api-create — Plan D: buat experience via endpoint web
+#            POST https://api.roblox.com/universes/create (cookie + CSRF token).
+#            Dipakai karena installer Studio terbukti rusak (launcher tidak pernah
+#            download Studio, diag 20 Nov) dan VM Muse tidak bisa mencapai
+#            api.roblox.com (egress proxy balas empty reply). Runner GitHub punya
+#            jaringan sendiri. Job ini jalan di ubuntu-latest (curl saja).
 #
 # Cara set secret + dispatch (parent saja, dari VM):
 #   GH_TOKEN=$(cat ../.github-pat) gh secret set ROBLOSECURITY --repo davidwara/brainrot-nusantara-game
@@ -24,9 +30,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "test = smoke test tanpa auth (cookie dummy); create = buat experience (butuh secrets.ROBLOSECURITY); diag = diagnosa installer Studio tanpa cookie"
+        description: "test = smoke test tanpa auth (cookie dummy); create = buat experience (butuh secrets.ROBLOSECURITY); diag = diagnosa installer Studio tanpa cookie; api-create = buat experience via endpoint web api.roblox.com/universes/create (butuh secrets.ROBLOSECURITY)"
         type: choice
-        options: [test, create, diag]
+        options: [test, create, diag, api-create]
         default: test
       place_name:
         description: "Nama experience yang dibuat (mode create)"
@@ -42,6 +48,7 @@ permissions:
 
 jobs:
   create-experience:
+    if: inputs.mode != 'api-create'
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -156,5 +163,65 @@ jobs:
           name: plan-c-run-log
           path: |
             run.log
+            place-ids.txt
+          retention-days: 7
+
+  api-create:
+    if: inputs.mode == 'api-create'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fail fast kalau secret kosong
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.ROBLOSECURITY }}" ]; then
+            echo "::error::ROBLOSECURITY secret kosong."
+            exit 1
+          fi
+          echo "ROBLOSECURITY secret terisi (nilai tidak dicetak)."
+
+      - name: Buat experience via api.roblox.com/universes/create
+        id: create
+        shell: bash
+        env:
+          ROBLOSECURITY: ${{ secrets.ROBLOSECURITY }}
+          PLACE_NAME: ${{ inputs.place_name }}
+          TEMPLATE_ID: ${{ inputs.template_place_id }}
+        run: |
+          BODY="{\"templatePlaceIdToUse\": $TEMPLATE_ID}"
+          echo "--- POST tanpa CSRF (ambil token) ---"
+          RESP=$(curl -s -i --max-time 30 -X POST "https://api.roblox.com/universes/create" -H "Cookie: .ROBLOSECURITY=$ROBLOSECURITY" -H "Content-Type: application/json" -d "$BODY")
+          echo "$RESP" | grep -i '^HTTP/' | tail -1
+          CSRF=$(echo "$RESP" | grep -i '^x-csrf-token:' | tr -d '\r' | awk '{print $2}')
+          echo "csrf_len=${#CSRF}"
+          if [ -z "$CSRF" ]; then
+            echo "--- respons lengkap (tanpa CSRF) ---"
+            echo "$RESP" | tail -5
+            echo "::error::Tidak dapat CSRF token — cookie mungkin tidak valid atau endpoint menolak."
+            exit 1
+          fi
+          echo "--- POST dengan CSRF (buat universe) ---"
+          curl -s --max-time 30 -X POST "https://api.roblox.com/universes/create" -H "Cookie: .ROBLOSECURITY=$ROBLOSECURITY" -H "X-CSRF-TOKEN: $CSRF" -H "Content-Type: application/json" -d "$BODY" -o api-create-response.json -w "HTTP:%{http_code}\n"
+          echo "--- respons ---"
+          cat api-create-response.json
+          echo ""
+          UNIVERSE_ID=$(python3 -c "import json; d=json.load(open('api-create-response.json')); print(d.get('universeId','') or d.get('UniverseId',''))" 2>/dev/null || echo "")
+          PLACE_ID=$(python3 -c "import json; d=json.load(open('api-create-response.json')); print(d.get('rootPlaceId','') or d.get('RootPlaceId','') or d.get('placeId',''))" 2>/dev/null || echo "")
+          echo "universe_id=$UNIVERSE_ID" >> "$GITHUB_OUTPUT"
+          echo "place_id=$PLACE_ID" >> "$GITHUB_OUTPUT"
+          printf "mode=api-create\nuniverse_id=%s\nplace_id=%s\n" "$UNIVERSE_ID" "$PLACE_ID" > place-ids.txt
+          cat place-ids.txt
+          if [ -z "$UNIVERSE_ID" ]; then
+            echo "::error::universeId tidak ditemukan di respons — lihat api-create-response.json."
+            exit 1
+          fi
+
+      - name: Upload respons sebagai artefak
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-c-api-create
+          path: |
+            api-create-response.json
             place-ids.txt
           retention-days: 7
