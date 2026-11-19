@@ -82,10 +82,10 @@ jobs:
         env:
           ROBLOSECURITY: ${{ secrets.ROBLOSECURITY }}
         run: |
-          $version = (Invoke-WebRequest -Uri "https://setup.roblox.com/versionQTStudio" -UseBasicParsing).Content.Trim()
+          $version = (Invoke-WebRequest -Uri "http://setup.roblox.com/versionQTStudio" -UseBasicParsing).Content.Trim()
           if (-not $version) { Write-Error "versionQTStudio kosong — setup.roblox.com tidak merespons"; exit 1 }
           Write-Host "Studio version: $version"
-          Invoke-WebRequest -Uri "https://setup.roblox.com/$version-RobloxStudio.zip" -OutFile studio.zip
+          Invoke-WebRequest -Uri "http://setup.roblox.com/$version-RobloxStudio.zip" -OutFile studio.zip
           $dest = "$env:LOCALAPPDATA\Roblox\Versions\$version"
           Expand-Archive studio.zip -DestinationPath $dest -Force
           $studioExe = Get-ChildItem $dest -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
