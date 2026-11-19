@@ -1,0 +1,129 @@
+name: Plan C — Create Experience (headless Studio)
+
+# Membuat experience Roblox BARU tanpa PC dan tanpa Studio lokal.
+# Rantai: GitHub Actions windows-latest -> install Roblox Studio (roblox-win-installer-action)
+# -> run-in-roblox menjalankan ci/create-place.lua headless -> AssetService:CreatePlaceAsync
+# mencetak BRAINROT_PLACE_ID (+ BRAINROT_UNIVERSE_ID bila lookup HTTP berhasil).
+#
+# Dipakai dua mode (workflow_dispatch):
+#   test   — smoke test TANPA auth: cookie dummy, script ci/smoke-test.lua. Membuktikan
+#            rantai install + headless run jalan di runner. TIDAK membuat apa pun.
+#   create — membuat experience "Brainrot Nusantara" (atau sesuai input). WAJIB repo secret
+#            ROBLOSECURITY berisi .ROBLOSECURITY cookie akun BorneoBrainrot. Cookie TIDAK
+#            PERNAH ditulis ke log/repo — hanya dibaca action installer dari secrets.
+#
+# Cara set secret + dispatch (parent saja, dari VM):
+#   GH_TOKEN=$(cat ../.github-pat) gh secret set ROBLOSECURITY --repo davidwara/brainrot-nusantara-game
+#   GH_TOKEN=$(cat ../.github-pat) gh workflow run create-experience.yml --repo davidwara/brainrot-nusantara-game \
+#     --ref plan-c/create-experience -f mode=create
+# Lalu cek hasil di tab Actions; place_id/universe_id ada di log + artefak place-ids.txt.
+# Verifikasi independen: GET https://apis.roblox.com/universes/v1/places/{placeId}/universe
+# dengan Open Cloud key (endpoint publik) atau cek Creator Dashboard.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "test = smoke test tanpa auth (cookie dummy); create = buat experience (butuh secrets.ROBLOSECURITY)"
+        type: choice
+        options: [test, create]
+        default: test
+      place_name:
+        description: "Nama experience yang dibuat (mode create)"
+        type: string
+        default: "Brainrot Nusantara"
+      template_place_id:
+        description: "Template place ID (95206881 = Baseplate resmi Roblox)"
+        type: string
+        default: "95206881"
+
+permissions:
+  contents: read
+
+jobs:
+  create-experience:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout (branch plan-c)
+        uses: actions/checkout@v4
+        with:
+          ref: plan-c/create-experience
+
+      - name: Fail fast kalau mode=create tapi secret kosong
+        if: inputs.mode == 'create'
+        shell: pwsh
+        run: |
+          if ("${{ secrets.ROBLOSECURITY }}" -eq "") {
+            Write-Error "ROBLOSECURITY secret is empty. Set repo secret dulu (lihat header workflow ini / ci/README-plan-c.md), lalu dispatch ulang mode=create."
+            exit 1
+          }
+          Write-Host "ROBLOSECURITY secret terisi (nilai tidak dicetak)."
+
+      - name: Install Roblox Studio
+        uses: OrbitalOwen/roblox-win-installer-action@1.1
+        timeout-minutes: 20
+        with:
+          cookie: ${{ inputs.mode == 'create' && secrets.ROBLOSECURITY || 'DUMMY_COOKIE_FOR_MECHANICS_TEST' }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install run-in-roblox via Foreman
+        uses: rojo-rbx/setup-foreman@v1.0.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run script in headless Studio
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          $ErrorActionPreference = "Continue"
+          if ("${{ inputs.mode }}" -eq "create") {
+            $env:PLAN_C_PLACE_NAME = "${{ inputs.place_name }}"
+            $env:PLAN_C_TEMPLATE_ID = "${{ inputs.template_place_id }}"
+            run-in-roblox --script ci/create-place.lua *> run.log
+          } else {
+            run-in-roblox --script ci/smoke-test.lua *> run.log
+          }
+          $code = $LASTEXITCODE
+          Get-Content run.log
+          Write-Host "run-in-roblox exit code: $code"
+          if ($code -ne 0) { exit $code }
+
+      - name: Extract place/universe IDs dari log
+        id: extract
+        if: always()
+        shell: pwsh
+        run: |
+          $log = Get-Content run.log -Raw -ErrorAction SilentlyContinue
+          if ($null -eq $log) { $log = "" }
+          $place = [regex]::Match($log, "BRAINROT_PLACE_ID=(\d+)").Groups[1].Value
+          $uni = [regex]::Match($log, "BRAINROT_UNIVERSE_ID=(\d+)").Groups[1].Value
+          $smoke = [regex]::Match($log, "BRAINROT_SMOKE_OK=1").Success
+          "place_id=$place" >> $env:GITHUB_OUTPUT
+          "universe_id=$uni" >> $env:GITHUB_OUTPUT
+          "smoke_ok=$smoke" >> $env:GITHUB_OUTPUT
+          @"
+          mode=${{ inputs.mode }}
+          place_id=$place
+          universe_id=$uni
+          smoke_ok=$smoke
+          "@ | Out-File -FilePath place-ids.txt -Encoding utf8
+          Get-Content place-ids.txt
+          if ("${{ inputs.mode }}" -eq "create" -and $place -eq "") {
+            Write-Error "Mode create tapi BRAINROT_PLACE_ID tidak ditemukan di log — CreatePlaceAsync gagal. Lihat run.log."
+            exit 1
+          }
+          if ("${{ inputs.mode }}" -eq "test" -and -not $smoke) {
+            Write-Error "Smoke test gagal — BRAINROT_SMOKE_OK tidak ditemukan di log. Lihat run.log."
+            exit 1
+          }
+
+      - name: Upload log + IDs sebagai artefak
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-c-run-log
+          path: |
+            run.log
+            place-ids.txt
+          retention-days: 7
