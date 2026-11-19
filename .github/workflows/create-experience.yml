@@ -180,6 +180,16 @@ jobs:
           fi
           echo "ROBLOSECURITY secret terisi (nilai tidak dicetak)."
 
+      - name: Diagnostik jaringan runner
+        shell: bash
+        run: |
+          for H in api.roblox.com apis.roblox.com www.roblox.com create.roblox.com; do
+            echo "--- $H ---"
+            getent hosts "$H" || echo "DNS gagal (getent)"
+            nslookup "$H" 2>&1 | grep -E "Address|can't|NXDOMAIN" | head -3 || true
+            curl -s -o /dev/null --max-time 15 -w "root GET: HTTP:%{http_code}\n" "https://$H/" || echo "curl gagal exit $?"
+          done
+
       - name: Buat experience via api.roblox.com/universes/create
         id: create
         shell: bash
