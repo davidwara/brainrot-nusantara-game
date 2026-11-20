@@ -453,20 +453,20 @@ jobs:
                 } elseif ($action -eq "KEY" -and $parts.Count -ge 3) {
                   $keys = ($parts[2..($parts.Count-1)] -join " ")
                   Write-Host "REMOTE CMD #$seq : KEY $keys"
-                  $wshell.AppActivate("Roblox Studio") | Out-Null
-                  Start-Sleep -Seconds 1
+                  # JANGAN AppActivate di sini: AppActivate("Roblox Studio") mengaktifkan
+                  # jendela UTAMA Studio dan mencuri fokus dari dialog login modal, sehingga
+                  # SendKeys jatuh ke jendela utama (bukan ke field). Field sudah difokuskan
+                  # oleh CLICK sebelumnya — SendKeys langsung ke kontrol yang fokus.
                   $wshell.SendKeys($keys)
                   Write-Host "KEY terkirim."
                 } elseif ($action -eq "TYPEUSER") {
                   Write-Host "REMOTE CMD #$seq : TYPEUSER (BorneoBrainrot)"
-                  $wshell.AppActivate("Roblox Studio") | Out-Null
-                  Start-Sleep -Seconds 1
+                  # Tanpa AppActivate (lihat komentar di KEY): ketik ke field yang sudah fokus.
                   $wshell.SendKeys("BorneoBrainrot")
                   Write-Host "TYPEUSER terkirim."
                 } elseif ($action -eq "TYPEPASSWORD") {
                   Write-Host "REMOTE CMD #$seq : TYPEPASSWORD (ketik secret, nilai tidak dicetak)"
-                  $wshell.AppActivate("Roblox Studio") | Out-Null
-                  Start-Sleep -Seconds 1
+                  # Tanpa AppActivate (lihat komentar di KEY): ketik ke field yang sudah fokus.
                   $pw = $env:ROBLOX_PASSWORD
                   $esc = ""
                   foreach ($ch in $pw.ToCharArray()) {
