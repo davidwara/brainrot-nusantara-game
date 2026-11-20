@@ -120,6 +120,33 @@ jobs:
             "extracontent-models.zip" = "ExtraContent\models"; "extracontent-textures.zip" = "ExtraContent\textures"
           }
           $skip = @("WebView2RuntimeInstaller.zip")
+          # Expand-Archive GAGAL di ApplicationConfig.zip (run 44693646250): zip itu berisi
+          # entri direktori "\" yang .NET anggap root drive -> error Zip Slip
+          # ("Extracting Zip entry would have resulted in a file outside the specified
+          # destination directory"). Ekstraksi manual di bawah me-skip entri yang
+          # keluar dari destinasi (entri "\" tidak berbahaya, hanya marker direktori).
+          function Expand-Pkg {
+            param([string]$Zip, [string]$Dest)
+            Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+            Add-Type -AssemblyName System.IO.Compression.ZipFile -ErrorAction SilentlyContinue
+            $archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
+            try {
+              $destRoot = [System.IO.Path]::GetFullPath($Dest)
+              foreach ($entry in $archive.Entries) {
+                $destPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($Dest, $entry.FullName))
+                if (-not $destPath.StartsWith($destRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                  Write-Host "SKIP entri di luar destinasi: $($entry.FullName)"
+                  continue
+                }
+                if ($entry.Name -eq "") { continue }
+                $dir = [System.IO.Path]::GetDirectoryName($destPath)
+                if ($dir -and -not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destPath, $true)
+              }
+            } finally {
+              $archive.Dispose()
+            }
+          }
           $count = 0
           for ($i = 1; $i -lt $manifest.Count; $i += 4) {
             $pkg = $manifest[$i]
@@ -128,7 +155,7 @@ jobs:
             $sub = $subdirs[$pkg]
             $target = if ($sub) { Join-Path $dest $sub } else { $dest }
             if ($sub) { New-Item -Path $target -ItemType Directory -Force | Out-Null }
-            Expand-Archive $pkg -DestinationPath $target -Force
+            Expand-Pkg -Zip $pkg -Dest $target
             Remove-Item $pkg -Force
             $count++
             Write-Host "Package OK: $pkg -> $target"
