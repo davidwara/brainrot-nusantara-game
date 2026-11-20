@@ -1,11 +1,11 @@
 name: Diag Protocol — roblox-studio:// handler
 
-# Diagnosa SATU KALI (Plan D, 20 Nov 2026): apakah handler protokol
-# roblox-studio:// terdaftar di runner windows-latest, apakah bisa dipicu
-# (shell + exe langsung + perintah registry), dan apakah instalasi Studio
-# dari zip mendaftarkannya.
+# Diagnosa Plan D (20 Nov 2026): apakah handler protokol roblox-studio://
+# terdaftar di runner windows-latest, apakah bisa dipicu (shell + exe
+# langsung + registrasi manual), dan apakah instalasi resmi Studio
+# mendaftarkannya.
 # TIDAK login, TIDAK pakai secret apa pun, TIDAK membuat experience.
-# Hasil: log + screenshot + verdict, di-upload sebagai artifact.
+# Hasil: log + screenshot, di-upload sebagai artifact.
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ permissions:
 jobs:
   diag-protocol:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - name: Cek registry handler SEBELUM install (baseline)
         shell: pwsh
@@ -38,40 +38,61 @@ jobs:
           }
           Write-Host "BASELINE SELESAI."
 
-      - name: Install Studio dari zip (replikasi instalasi run login)
+      - name: Probe cepat — endpoint zip Studio (dokumentasi saja, tidak gagalkan job)
         shell: pwsh
         run: |
-          $installMethod = "zip"
+          Write-Host "=== PROBE: versionStudio via http (https terbukti empty-reply) ==="
           try {
-            $version = (Invoke-WebRequest -Uri "https://setup.roblox.com/versionStudio" -UseBasicParsing).Content.Trim()
-            Write-Host "STUDIO VERSION: $version"
-            $zipUrl = "https://setup.roblox.com/$version-RobloxStudio.zip"
+            $v = (Invoke-WebRequest -Uri "http://setup.roblox.com/versionStudio" -UseBasicParsing -TimeoutSec 20).Content.Trim()
+            Write-Host "STUDIO VERSION: $v"
+            $zipUrl = "http://setup.roblox.com/$v-RobloxStudio.zip"
             Write-Host "ZIP URL: $zipUrl"
-            Invoke-WebRequest -Uri $zipUrl -OutFile "$env:RUNNER_TEMP\RobloxStudio.zip" -UseBasicParsing
-            Write-Host "ZIP OK: $((Get-Item "$env:RUNNER_TEMP\RobloxStudio.zip").Length) byte"
-            New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\studio" | Out-Null
-            Expand-Archive -Path "$env:RUNNER_TEMP\RobloxStudio.zip" -DestinationPath "$env:RUNNER_TEMP\studio" -Force
+            try {
+              $r = Invoke-WebRequest -Uri $zipUrl -OutFile "$env:RUNNER_TEMP\probe.zip" -UseBasicParsing -TimeoutSec 60
+              Write-Host "ZIP PROBE: HTTP $($r.StatusCode), size $((Get-Item "$env:RUNNER_TEMP\probe.zip").Length)"
+            } catch {
+              Write-Host "ZIP PROBE GAGAL: $($_.Exception.Message)"
+            }
           } catch {
-            Write-Host "ZIP GAGAL: $($_.Exception.Message)"
-            Write-Host "FALLBACK: launcher RobloxStudioLauncherBeta.exe"
-            $installMethod = "launcher"
-            Invoke-WebRequest -Uri "http://setup.roblox.com/RobloxStudioLauncherBeta.exe" -OutFile "$env:RUNNER_TEMP\RobloxStudioLauncherBeta.exe" -UseBasicParsing
-            $lp = Start-Process -FilePath "$env:RUNNER_TEMP\RobloxStudioLauncherBeta.exe" -PassThru
-            Write-Host "LAUNCHER pid=$($lp.Id), tunggu 90 dtk"
-            Start-Sleep -Seconds 90
+            Write-Host "VERSION PROBE GAGAL: $($_.Exception.Message)"
+          }
+          Write-Host "PROBE SELESAI (lanjut ke instalasi resmi)."
+
+      - name: Install Studio resmi via winget (fallback launcher bila gagal)
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          $exe = $null
+          Write-Host "=== WINGET: install Roblox.RobloxStudio ==="
+          try {
+            winget --version
+            winget install --id Roblox.RobloxStudio -e --accept-source-agreements --accept-package-agreements --silent
+            Write-Host "WINGET exit: $LASTEXITCODE"
+          } catch {
+            Write-Host "WINGET GAGAL: $($_.Exception.Message)"
           }
           $exe = Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $exe) { $exe = Get-ChildItem "$env:RUNNER_TEMP\studio" -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1 }
-          if (-not $exe) { Write-Error "RobloxStudioBeta.exe TIDAK ditemukan (zip maupun launcher)"; exit 1 }
+          if (-not $exe) {
+            Write-Host "EXE belum ada setelah winget — FALLBACK launcher, polling sampai 8 menit"
+            Invoke-WebRequest -Uri "http://setup.roblox.com/RobloxStudioLauncherBeta.exe" -OutFile "$env:RUNNER_TEMP\RobloxStudioLauncherBeta.exe" -UseBasicParsing
+            $lp = Start-Process -FilePath "$env:RUNNER_TEMP\RobloxStudioLauncherBeta.exe" -PassThru
+            Write-Host "LAUNCHER pid=$($lp.Id)"
+            for ($i = 0; $i -lt 16; $i++) {
+              Start-Sleep -Seconds 30
+              $exe = Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($exe) { Write-Host "EXE KETEMU setelah $($i * 30 + 30) dtk polling launcher"; break }
+              $lpAlive = Get-Process -Id $lp.Id -ErrorAction SilentlyContinue
+              Write-Host "poll $($i + 1)/16: exe belum ada, launcher hidup=$($null -ne $lpAlive)"
+            }
+          }
+          if (-not $exe) { Write-Error "RobloxStudioBeta.exe TIDAK ditemukan (winget maupun launcher)"; exit 1 }
           Write-Host "EXE: $($exe.FullName)"
-          Write-Host "INSTALL METHOD: $installMethod"
           "STUDIO_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "INSTALL_METHOD=$installMethod" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Cek registry handler SETELAH install (belum jalankan exe)
+      - name: Cek registry handler SETELAH install resmi
         shell: pwsh
         run: |
-          Write-Host "=== Handler SETELAH install, SEBELUM exe dijalankan ==="
+          Write-Host "=== Handler SETELAH install resmi, SEBELUM exe dijalankan ==="
           foreach ($p in @("HKCR:\roblox-studio", "HKCU:\Software\Classes\roblox-studio", "HKLM:\SOFTWARE\Classes\roblox-studio")) {
             if (Test-Path $p) {
               Write-Host "ADA: $p"
@@ -120,7 +141,6 @@ jobs:
             Write-Host "SCREENSHOT: $name $((Get-Item $shotPath).Length) byte"
           }
           Write-Host "=== TES 1: Start-Process 'roblox-studio://' ==="
-          $before = (Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue).Id
           try {
             Start-Process "roblox-studio://"
             Write-Host "TES1: Start-Process TIDAK error (shell menerima URL)"
