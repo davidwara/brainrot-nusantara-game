@@ -11,6 +11,16 @@ name: Plan C — Create Experience (headless Studio)
 #   create — membuat experience "Brainrot Nusantara" (atau sesuai input). WAJIB repo secret
 #            ROBLOSECURITY berisi .ROBLOSECURITY cookie akun BorneoBrainrot. Cookie TIDAK
 #            PERNAH ditulis ke log/repo — hanya dibaca action installer dari secrets.
+#   qr-login — login Studio via KODE Quick Sign-in (kode muncul di Studio, user ketik
+#            kode itu ke aplikasi Roblox HP yang sudah login sebagai BorneoBrainrot),
+#            lalu buat experience seperti mode studio-zip. Cookie secret TIDAK dipakai
+#            untuk login (mekanisme registry 2021 sudah mati di Studio modern).
+#            Screenshot layar login di-push live ke branch qr-login-shots
+#            (file qr-login-shot.png) supaya parent bisa membaca kodenya dan
+#            meneruskannya ke user secepatnya; loop ~30 dtk/shot, maks ~22 menit.
+#            Loop juga membaca perintah remote dari branch qr-login-cmd (file cmd.txt,
+#            format "<seq> CLICK x y" / "<seq> KEY ...") untuk klik tombol
+#            Quick Sign-in di layar login.
 #   api-create — Plan D: buat experience via endpoint web
 #            POST https://api.roblox.com/universes/create (cookie + CSRF token).
 #            Dipakai karena installer Studio terbukti rusak (launcher tidak pernah
@@ -30,9 +40,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "test = smoke test tanpa auth (cookie dummy); create = buat experience (butuh secrets.ROBLOSECURITY); diag = diagnosa installer Studio tanpa cookie; api-create = buat experience via endpoint web api.roblox.com/universes/create (butuh secrets.ROBLOSECURITY); studio-zip = buat experience via Studio dari zip langsung, tanpa launcher (butuh secrets.ROBLOSECURITY); diag-studio = diagnosa launch Studio dari zip (tanpa place, dengan place, via launcher) + event log — TIDAK membuat experience; diag-shot = screenshot jendela launcher (apa yang ditunggu launcher) + daftar jendela — TIDAK membuat experience; diag-thread = dump modul/thread/koneksi exe Studio yang macet 0 CPU — TIDAK membuat experience; diag-event = launch exe dengan argumen event launcher (-startEvent/-readyEvent/-showEvent) + screenshot — TIDAK membuat experience"
+        description: "test = smoke test tanpa auth (cookie dummy); create = buat experience (butuh secrets.ROBLOSECURITY); diag = diagnosa installer Studio tanpa cookie; api-create = buat experience via endpoint web api.roblox.com/universes/create (butuh secrets.ROBLOSECURITY); studio-zip = buat experience via Studio dari zip langsung, tanpa launcher (butuh secrets.ROBLOSECURITY); diag-studio = diagnosa launch Studio dari zip (tanpa place, dengan place, via launcher) + event log — TIDAK membuat experience; diag-shot = screenshot jendela launcher (apa yang ditunggu launcher) + daftar jendela — TIDAK membuat experience; diag-thread = dump modul/thread/koneksi exe Studio yang macet 0 CPU — TIDAK membuat experience; diag-event = launch exe dengan argumen event launcher (-startEvent/-readyEvent/-showEvent) + screenshot — TIDAK membuat experience; qr-login = login Studio via kode Quick Sign-in (user ketik kode ke aplikasi Roblox HP) + buat experience"
         type: choice
-        options: [test, create, diag, api-create, studio-zip, diag-studio, diag-shot, diag-thread, diag-event]
+        options: [test, create, diag, api-create, studio-zip, diag-studio, diag-shot, diag-thread, diag-event, qr-login]
         default: test
       place_name:
         description: "Nama experience yang dibuat (mode create)"
@@ -51,6 +61,10 @@ jobs:
     if: inputs.mode != 'api-create'
     runs-on: windows-latest
     timeout-minutes: 45
+    # qr-login butuh push branch qr-login-shots (screenshot QR live) — override
+    # workflow-level contents:read hanya untuk job ini.
+    permissions:
+      contents: write
     steps:
       - name: Checkout (branch plan-c)
         uses: actions/checkout@v4
@@ -76,7 +90,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Studio dari zip (tanpa launcher)
-        if: inputs.mode == 'studio-zip' || inputs.mode == 'diag-studio' || inputs.mode == 'diag-shot' || inputs.mode == 'diag-thread' || inputs.mode == 'diag-event'
+        if: inputs.mode == 'studio-zip' || inputs.mode == 'diag-studio' || inputs.mode == 'diag-shot' || inputs.mode == 'diag-thread' || inputs.mode == 'diag-event' || inputs.mode == 'qr-login'
         shell: pwsh
         timeout-minutes: 20
         env:
@@ -175,6 +189,130 @@ jobs:
           Write-Host $resp
           if ($resp -match "HTTP:401") { Write-Error "Cookie TIDAK VALID (401) — butuh cookie baru dari user"; exit 1 }
           if ($resp -match "HTTP:200") { Write-Host "Cookie VALID." }
+
+      - name: Code login loop (qr-login)
+        id: qr-login
+        if: inputs.mode == 'qr-login'
+        shell: pwsh
+        timeout-minutes: 30
+        run: |
+          $ErrorActionPreference = "Continue"
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { Write-Error "RobloxStudioBeta.exe tidak ditemukan"; exit 1 }
+          Write-Host "Studio exe: $($exe.FullName)"
+          $place = Join-Path $env:GITHUB_WORKSPACE "game.rbxl"
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          function Save-Shot([string]$name) {
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+            $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+            $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $shotPath = Join-Path $env:GITHUB_WORKSPACE $name
+            $bmp.Save($shotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+            $gfx.Dispose(); $bmp.Dispose()
+            Write-Host "SCREENSHOT: $shotPath $((Get-Item $shotPath).Length) byte, $($bounds.Width)x$($bounds.Height)"
+          }
+          # Klik mouse via user32 (untuk klik tombol Quick Sign-in sesuai perintah remote).
+          # C# ditulis sebagai array string (bukan here-string) supaya indentasi YAML aman.
+          $mouseCode = @(
+            "using System;",
+            "using System.Runtime.InteropServices;",
+            "public class MouseCtl {",
+            "  [DllImport(`"user32.dll`")] public static extern bool SetCursorPos(int X, int Y);",
+            "  [DllImport(`"user32.dll`")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);",
+            "  public static void Click(int x, int y) {",
+            "    SetCursorPos(x, y);",
+            "    mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);",
+            "    mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);",
+            "  }",
+            "}"
+          ) -join "`n"
+          Add-Type -TypeDefinition $mouseCode
+          $wshell = New-Object -ComObject WScript.Shell
+          # Git: push screenshot live ke branch qr-login-shots; baca perintah remote dari
+          # branch qr-login-cmd (file cmd.txt, format "<seq> CLICK x y" / "<seq> KEY ...").
+          git config user.email "qr-login@roblox.local"
+          git config user.name "qr-login"
+          git fetch --unshallow 2>$null | Out-Null
+          git checkout -B qr-login-shots
+          Write-Host "Branch qr-login-shots siap."
+          $proc = Start-Process -FilePath $exe.FullName -ArgumentList $place -PassThru
+          Write-Host "Studio diluncurkan pid=$($proc.Id) — tunggu 75 dtk sampai layar login muncul"
+          Start-Sleep -Seconds 75
+          $statusFile = Join-Path $env:GITHUB_WORKSPACE "qr-auth-status.txt"
+          "authenticated=false" | Out-File -FilePath $statusFile -Encoding utf8
+          $deadline = (Get-Date).AddMinutes(22)
+          $shotIndex = 0
+          $lastSeq = 0
+          $authenticated = $false
+          while ((Get-Date) -lt $deadline) {
+            $shotIndex++
+            $num = "{0:D3}" -f $shotIndex
+            Save-Shot "qr-login-shot-$num.png"
+            Copy-Item (Join-Path $env:GITHUB_WORKSPACE "qr-login-shot-$num.png") (Join-Path $env:GITHUB_WORKSPACE "qr-login-shot.png") -Force
+            git add qr-login-shot.png 2>$null
+            git commit --amend --no-edit --allow-empty -m "qr shot $shotIndex $(Get-Date -Format 'HH:mm:ss')" 2>$null | Out-Null
+            git push --force origin qr-login-shots 2>&1 | Select-Object -Last 1
+            Write-Host "SHOT $shotIndex di-push $(Get-Date -Format 'HH:mm:ss')"
+            # Perintah remote (klik / tombol) dari branch qr-login-cmd
+            git fetch origin qr-login-cmd 2>$null | Out-Null
+            $cmdText = git show origin/qr-login-cmd:cmd.txt 2>$null
+            if ($cmdText) {
+              $parts = ($cmdText.Trim() -split "\s+")
+              $seq = 0
+              if ([int]::TryParse($parts[0], [ref]$seq) -and $seq -gt $lastSeq) {
+                $lastSeq = $seq
+                $action = $parts[1]
+                if ($action -eq "CLICK" -and $parts.Count -ge 4) {
+                  $x = [int]$parts[2]; $y = [int]$parts[3]
+                  Write-Host "REMOTE CMD #$seq : CLICK $x $y"
+                  $wshell.AppActivate("Roblox Studio") | Out-Null
+                  Start-Sleep -Seconds 1
+                  [MouseCtl]::Click($x, $y)
+                  Write-Host "CLICK selesai."
+                } elseif ($action -eq "KEY" -and $parts.Count -ge 3) {
+                  $keys = ($parts[2..($parts.Count-1)] -join " ")
+                  Write-Host "REMOTE CMD #$seq : KEY $keys"
+                  $wshell.AppActivate("Roblox Studio") | Out-Null
+                  Start-Sleep -Seconds 1
+                  $wshell.SendKeys($keys)
+                  Write-Host "KEY terkirim."
+                } else {
+                  Write-Host "REMOTE CMD #$seq : tidak dikenal/dilewati: $cmdText"
+                }
+              }
+            }
+            # Cek autentikasi: log Studio + file sesi
+            $logDir = Join-Path $env:LOCALAPPDATA "Roblox\logs"
+            $latest = Get-ChildItem $logDir -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($latest) {
+              $tail = Get-Content $latest.FullName -Tail 300 -ErrorAction SilentlyContinue
+              if ($tail -match "Authenticated\s*:\s*YES") { $authenticated = $true; Write-Host "LOG: Authenticated YES terdeteksi." }
+            }
+            $cookieFile = Join-Path $env:LOCALAPPDATA "Roblox\RobloxCookies.dat"
+            if (Test-Path $cookieFile) {
+              $ageMin = ((Get-Date) - (Get-Item $cookieFile).LastWriteTime).TotalMinutes
+              Write-Host "RobloxCookies.dat ada (umur $([math]::Round($ageMin,1)) mnt)"
+              if ($ageMin -lt 30) { $authenticated = $true; Write-Host "SESI: file cookie baru terdeteksi." }
+            }
+            if ($authenticated) {
+              "authenticated=true" | Out-File -FilePath $statusFile -Encoding utf8
+              "authenticated=true" >> $env:GITHUB_OUTPUT
+              Write-Host "AUTHENTICATED setelah shot $shotIndex — hentikan loop."
+              break
+            }
+            $alive = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+            if (-not $alive) { Write-Host "Studio sudah mati — keluar loop."; break }
+            Start-Sleep -Seconds 20
+          }
+          "authenticated=$($authenticated.ToString().ToLower())" | Out-File -FilePath $statusFile -Encoding utf8
+          "authenticated=$($authenticated.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "CODE LOGIN LOOP SELESAI: authenticated=$authenticated shots=$shotIndex"
+          if ($authenticated) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Write-Host "Studio interaktif dimatikan (sesi sudah tersimpan di disk)."
+          }
 
       - name: Pre-warm Studio
         if: inputs.mode == 'studio-zip'
@@ -399,12 +537,12 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run script in headless Studio
-        if: inputs.mode != 'diag' && inputs.mode != 'diag-studio' && inputs.mode != 'diag-shot' && inputs.mode != 'diag-thread' && inputs.mode != 'diag-event'
+        if: inputs.mode != 'diag' && inputs.mode != 'diag-studio' && inputs.mode != 'diag-shot' && inputs.mode != 'diag-thread' && inputs.mode != 'diag-event' && (inputs.mode != 'qr-login' || steps.qr-login.outputs.authenticated == 'true')
         shell: pwsh
         timeout-minutes: 20
         run: |
           $ErrorActionPreference = "Continue"
-          if ("${{ inputs.mode }}" -eq "create" -or "${{ inputs.mode }}" -eq "studio-zip") {
+          if ("${{ inputs.mode }}" -eq "create" -or "${{ inputs.mode }}" -eq "studio-zip" -or "${{ inputs.mode }}" -eq "qr-login") {
             $env:PLAN_C_PLACE_NAME = "${{ inputs.place_name }}"
             $env:PLAN_C_TEMPLATE_ID = "${{ inputs.template_place_id }}"
             run-in-roblox --place game.rbxl --script ci/create-place.lua *> run.log
@@ -436,8 +574,8 @@ jobs:
           smoke_ok=$smoke
           "@ | Out-File -FilePath place-ids.txt -Encoding utf8
           Get-Content place-ids.txt
-          if (("${{ inputs.mode }}" -eq "create" -or "${{ inputs.mode }}" -eq "studio-zip") -and $place -eq "") {
-            Write-Error "Mode create tapi BRAINROT_PLACE_ID tidak ditemukan di log — CreatePlaceAsync gagal. Lihat run.log."
+          if (("${{ inputs.mode }}" -eq "create" -or "${{ inputs.mode }}" -eq "studio-zip" -or "${{ inputs.mode }}" -eq "qr-login") -and $place -eq "") {
+            Write-Error "Mode ${{ inputs.mode }} tapi BRAINROT_PLACE_ID tidak ditemukan di log — CreatePlaceAsync gagal / Studio belum login. Lihat run.log."
             exit 1
           }
           if ("${{ inputs.mode }}" -eq "test" -and -not $smoke) {
@@ -456,6 +594,8 @@ jobs:
             launcher-shot.png
             launcher-shot2.png
             studio-event-shot.png
+            qr-login-shot*.png
+            qr-auth-status.txt
           retention-days: 7
 
   api-create:
