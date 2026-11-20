@@ -1,1 +1,1 @@
-11 KEY %{TAB}
+12 KEY ^lhttps://www.roblox.com/login{ENTER}
