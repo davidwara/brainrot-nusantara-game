@@ -140,6 +140,13 @@ jobs:
           Start-Sleep -Seconds 60
           $alive = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
           Write-Host "Studio masih jalan setelah 60 dtk: $($null -ne $alive)"
+          Write-Host "=== DIAGNOSTIK STUDIO (60 dtk) ==="
+          Get-Process Roblox* -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "PROC: $($_.Name) pid=$($_.Id) cpu=$($_.CPU)s ws=$([math]::Round($_.WorkingSet64/1MB))MB title='$($_.MainWindowTitle)'" }
+          $robloxRoot = Join-Path $env:LOCALAPPDATA "Roblox"
+          Write-Host "=== File di $robloxRoot (rekursif, 40 terbaru) ==="
+          Get-ChildItem $robloxRoot -Recurse -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 40 | ForEach-Object { Write-Host "$($_.LastWriteTime.ToString('HH:mm:ss')) $($_.Length) $($_.FullName)" }
+          Write-Host "=== Registry RobloxStudio ==="
+          Get-ItemProperty "HKCU:\Software\Roblox\RobloxStudio" -ErrorAction SilentlyContinue | Format-List | Out-String | Write-Host
           $logDir = Join-Path $env:LOCALAPPDATA "Roblox\logs"
           $latest = Get-ChildItem $logDir -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if ($latest) {
