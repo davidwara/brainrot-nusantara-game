@@ -28,8 +28,11 @@ name: Plan C — Create Experience (headless Studio)
 #            "Create in Studio"). Screenshot layar login di-push live ke branch
 #            password-login-shots (file password-login-shot.png); loop membaca perintah
 #            remote dari branch password-login-cmd (file cmd.txt, format
-#            "<seq> CLICK x y" / "<seq> KEY ..." / "<seq> TYPEUSER" /
-#            "<seq> TYPEPASSWORD"). TYPEPASSWORD mengetik secret ROBLOX_PASSWORD
+#            "<seq> CLICK x y" / "<seq> CLICKRAW x y" / "<seq> KEY ..." /
+#            "<seq> TYPEUSER" / "<seq> TYPEPASSWORD"). CLICKRAW = klik mouse
+#            TANPA AppActivate Studio, untuk menggerakkan Edge setelah klik
+#            "Login via Browser" (Studio gagal 3x di handoff Continue -> sesi).
+#            TYPEPASSWORD mengetik secret ROBLOX_PASSWORD
 #            langsung dari env — NILAI TIDAK PERNAH ditulis ke log/file/cmd.txt.
 #            Kalau Roblox minta verifikasi (email/kode) karena IP data center,
 #            screenshot akan menunjukkannya — parent yang minta kode ke user.
@@ -407,7 +410,8 @@ jobs:
           $wshell = New-Object -ComObject WScript.Shell
           # Git: push screenshot live ke branch password-login-shots; baca perintah remote
           # dari branch password-login-cmd (file cmd.txt, format "<seq> CLICK x y" /
-          # "<seq> KEY ..." / "<seq> TYPEUSER" / "<seq> TYPEPASSWORD").
+          # "<seq> CLICKRAW x y" / "<seq> KEY ..." / "<seq> TYPEUSER" / "<seq> TYPEPASSWORD").
+          # CLICKRAW = klik tanpa AppActivate (untuk jendela Edge "Login via Browser").
           # TYPEPASSWORD mengetik $env:ROBLOX_PASSWORD via SendKeys — NILAI TIDAK PERNAH
           # ditulis ke log/file/cmd.txt. SendKeys mengartikan + ^ % ~ ( ) { } secara
           # khusus, jadi karakter-karakter itu di-escape dulu dengan { }.
@@ -450,6 +454,18 @@ jobs:
                   Start-Sleep -Seconds 1
                   [MouseCtl]::Click($x, $y)
                   Write-Host "CLICK selesai."
+                } elseif ($action -eq "CLICKRAW" -and $parts.Count -ge 4) {
+                  $x = [int]$parts[2]; $y = [int]$parts[3]
+                  Write-Host "REMOTE CMD #$seq : CLICKRAW $x $y (tanpa AppActivate — untuk jendela Edge/browser)"
+                  # TANPA AppActivate("Roblox Studio"): klik mouse mentah supaya sampai
+                  # ke jendela lain (Edge yang dibuka "Login via Browser"). Klik nyata
+                  # juga mengaktifkan jendela di bawah kursor, sehingga SendKeys
+                  # berikutnya (KEY/TYPEUSER/TYPEPASSWORD) masuk ke jendela itu.
+                  # Dipakai setelah Studio gagal 3x di handoff Continue -> sesi dan
+                  # "Login via Browser" jadi satu-satunya jalur (run 4: klik ke Edge
+                  # tidak pernah sampai karena CLICK selalu AppActivate Studio dulu).
+                  [MouseCtl]::Click($x, $y)
+                  Write-Host "CLICKRAW selesai."
                 } elseif ($action -eq "KEY" -and $parts.Count -ge 3) {
                   $keys = ($parts[2..($parts.Count-1)] -join " ")
                   Write-Host "REMOTE CMD #$seq : KEY $keys"
