@@ -85,9 +85,45 @@ jobs:
           $version = (Invoke-WebRequest -Uri "http://setup.roblox.com/versionQTStudio" -UseBasicParsing).Content.Trim()
           if (-not $version) { Write-Error "versionQTStudio kosong — setup.roblox.com tidak merespons"; exit 1 }
           Write-Host "Studio version: $version"
-          Invoke-WebRequest -Uri "http://setup.roblox.com/$version-RobloxStudio.zip" -OutFile studio.zip
           $dest = "$env:LOCALAPPDATA\Roblox\Versions\$version"
-          Expand-Archive studio.zip -DestinationPath $dest -Force
+          New-Item -Path $dest -ItemType Directory -Force | Out-Null
+          # Installer resmi mengunduh SEMUA package dari manifest rbxPkgManifest.txt
+          # (zip versionQTStudio hanya 1 dari 32 package — tanpa Libraries.zip dkk,
+          # exe gagal start: libfbxsdk.dll not found). Peta subdirektori dari Bloxstrap.
+          $manifest = (Invoke-WebRequest -Uri "http://setup.roblox.com/$version-rbxPkgManifest.txt" -UseBasicParsing).Content -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+          if ($manifest[0] -ne "v0") { Write-Error "Format manifest tidak dikenal: $($manifest[0])"; exit 1 }
+          $subdirs = @{
+            "ssl.zip" = "ssl"; "ApplicationConfig.zip" = "ApplicationConfig"; "BuiltInPlugins.zip" = "BuiltInPlugins";
+            "BuiltInStandalonePlugins.zip" = "BuiltInStandalonePlugins"; "Plugins.zip" = "Plugins"; "Qml.zip" = "Qml";
+            "StudioFonts.zip" = "StudioFonts"; "content-avatar.zip" = "content\avatar"; "content-configs.zip" = "content\configs";
+            "content-fonts.zip" = "content\fonts"; "content-models.zip" = "content\models";
+            "content-qt_translations.zip" = "content\qt_translations"; "content-sky.zip" = "content\sky";
+            "content-sounds.zip" = "content\sounds"; "shaders.zip" = "shaders"; "content-textures2.zip" = "content\textures";
+            "content-textures3.zip" = "PlatformContent\pc\textures"; "content-studio_svg_textures.zip" = "content\studio_svg_textures";
+            "content-terrain.zip" = "PlatformContent\pc\terrain"; "content-platform-fonts.zip" = "PlatformContent\pc\fonts";
+            "content-api-docs.zip" = "content\api_docs"; "extracontent-scripts.zip" = "ExtraContent\scripts";
+            "extracontent-luapackages.zip" = "ExtraContent\LuaPackages"; "extracontent-translations.zip" = "ExtraContent\translations";
+            "extracontent-models.zip" = "ExtraContent\models"; "extracontent-textures.zip" = "ExtraContent\textures"
+          }
+          $skip = @("WebView2RuntimeInstaller.zip")
+          $count = 0
+          for ($i = 1; $i -lt $manifest.Count; $i += 4) {
+            $pkg = $manifest[$i]
+            if (-not $pkg -or $skip -contains $pkg) { continue }
+            Invoke-WebRequest -Uri "http://setup.roblox.com/$version-$pkg" -OutFile $pkg
+            $sub = $subdirs[$pkg]
+            $target = if ($sub) { Join-Path $dest $sub } else { $dest }
+            if ($sub) { New-Item -Path $target -ItemType Directory -Force | Out-Null }
+            Expand-Archive $pkg -DestinationPath $target -Force
+            Remove-Item $pkg -Force
+            $count++
+            Write-Host "Package OK: $pkg -> $target"
+          }
+          Write-Host "Total package ter-install: $count"
+          $must = @("RobloxStudioBeta.exe","libfbxsdk.dll","Qt5Core.dll","Qt5Gui.dll","Qt5Widgets.dll","MSVCP140.dll","VCRUNTIME140.dll","WebView2Loader.dll")
+          foreach ($f in $must) { if (-not (Test-Path (Join-Path $dest $f))) { Write-Error "File kunci hilang: $f"; exit 1 } }
+          if (-not (Test-Path (Join-Path $dest "ssl\cacert.pem"))) { Write-Error "File kunci hilang: ssl\cacert.pem"; exit 1 }
+          Write-Host "Verifikasi file kunci: LENGKAP"
           $studioExe = Get-ChildItem $dest -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $studioExe) { Write-Error "RobloxStudioBeta.exe tidak ditemukan setelah extract"; exit 1 }
           Write-Host "Studio exe: $($studioExe.FullName)"
