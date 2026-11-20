@@ -30,9 +30,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "test = smoke test tanpa auth (cookie dummy); create = buat experience (butuh secrets.ROBLOSECURITY); diag = diagnosa installer Studio tanpa cookie; api-create = buat experience via endpoint web api.roblox.com/universes/create (butuh secrets.ROBLOSECURITY); studio-zip = buat experience via Studio dari zip langsung, tanpa launcher (butuh secrets.ROBLOSECURITY); diag-studio = diagnosa launch Studio dari zip (tanpa place, dengan place, via launcher) + event log — TIDAK membuat experience; diag-shot = screenshot jendela launcher (apa yang ditunggu launcher) + daftar jendela — TIDAK membuat experience; diag-thread = dump modul/thread/koneksi exe Studio yang macet 0 CPU — TIDAK membuat experience"
+        description: "test = smoke test tanpa auth (cookie dummy); create = buat experience (butuh secrets.ROBLOSECURITY); diag = diagnosa installer Studio tanpa cookie; api-create = buat experience via endpoint web api.roblox.com/universes/create (butuh secrets.ROBLOSECURITY); studio-zip = buat experience via Studio dari zip langsung, tanpa launcher (butuh secrets.ROBLOSECURITY); diag-studio = diagnosa launch Studio dari zip (tanpa place, dengan place, via launcher) + event log — TIDAK membuat experience; diag-shot = screenshot jendela launcher (apa yang ditunggu launcher) + daftar jendela — TIDAK membuat experience; diag-thread = dump modul/thread/koneksi exe Studio yang macet 0 CPU — TIDAK membuat experience; diag-event = launch exe dengan argumen event launcher (-startEvent/-readyEvent/-showEvent) + screenshot — TIDAK membuat experience"
         type: choice
-        options: [test, create, diag, api-create, studio-zip, diag-studio, diag-shot, diag-thread]
+        options: [test, create, diag, api-create, studio-zip, diag-studio, diag-shot, diag-thread, diag-event]
         default: test
       place_name:
         description: "Nama experience yang dibuat (mode create)"
@@ -68,7 +68,7 @@ jobs:
           Write-Host "ROBLOSECURITY secret terisi (nilai tidak dicetak)."
 
       - name: Install Roblox Studio
-        if: inputs.mode != 'diag' && inputs.mode != 'studio-zip' && inputs.mode != 'diag-studio' && inputs.mode != 'diag-shot' && inputs.mode != 'diag-thread'
+        if: inputs.mode != 'diag' && inputs.mode != 'studio-zip' && inputs.mode != 'diag-studio' && inputs.mode != 'diag-shot' && inputs.mode != 'diag-thread' && inputs.mode != 'diag-event'
         uses: OrbitalOwen/roblox-win-installer-action@1.1
         timeout-minutes: 20
         with:
@@ -76,7 +76,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Studio dari zip (tanpa launcher)
-        if: inputs.mode == 'studio-zip' || inputs.mode == 'diag-studio' || inputs.mode == 'diag-shot' || inputs.mode == 'diag-thread'
+        if: inputs.mode == 'studio-zip' || inputs.mode == 'diag-studio' || inputs.mode == 'diag-shot' || inputs.mode == 'diag-thread' || inputs.mode == 'diag-event'
         shell: pwsh
         timeout-minutes: 20
         env:
@@ -117,7 +117,7 @@ jobs:
           Write-Host "Studio dari zip SIAP."
 
       - name: Cek cookie valid
-        if: inputs.mode == 'studio-zip' || inputs.mode == 'diag-studio' || inputs.mode == 'diag-shot' || inputs.mode == 'diag-thread'
+        if: inputs.mode == 'studio-zip' || inputs.mode == 'diag-studio' || inputs.mode == 'diag-shot' || inputs.mode == 'diag-thread' || inputs.mode == 'diag-event'
         shell: pwsh
         env:
           ROBLOSECURITY: ${{ secrets.ROBLOSECURITY }}
@@ -280,6 +280,41 @@ jobs:
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
           Write-Host "DIAG-THREAD SELESAI."
 
+      - name: Launch exe dengan event launcher (diag-event)
+        if: inputs.mode == 'diag-event'
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { Write-Error "RobloxStudioBeta.exe tidak ditemukan"; exit 1 }
+          Write-Host "EXE: $($exe.FullName)"
+          $startEv = New-Object System.Threading.EventWaitHandle($true, [System.Threading.EventResetMode]::ManualReset, "RobloxDiagStartEvent")
+          $readyEv = New-Object System.Threading.EventWaitHandle($true, [System.Threading.EventResetMode]::ManualReset, "RobloxDiagReadyEvent")
+          $showEv = New-Object System.Threading.EventWaitHandle($true, [System.Threading.EventResetMode]::ManualReset, "RobloxDiagShowEvent")
+          Write-Host "EVENT: 3 named event dibuat (ManualReset, sudah ter-signal)"
+          $args = "-startEvent RobloxDiagStartEvent -readyEvent RobloxDiagReadyEvent -showEvent RobloxDiagShowEvent"
+          $proc = Start-Process -FilePath $exe.FullName -ArgumentList $args -PassThru
+          Write-Host "STARTED pid=$($proc.Id) args='$args'"
+          Start-Sleep -Seconds 30
+          $p = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+          if (-not $p) { Write-Host "PROC: sudah keluar"; exit 0 }
+          Write-Host "PROC: $($p.ProcessName) pid=$($p.Id) cpu=$($p.CPU)s ws=$([math]::Round($p.WorkingSet64/1MB))MB title='$($p.MainWindowTitle)' threads=$($p.Threads.Count) modules=$(@($p.Modules).Count)"
+          Write-Host "--- Semua jendela terlihat ---"
+          Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { Write-Host "WIN: $($_.ProcessName) pid=$($_.Id) title='$($_.MainWindowTitle)'" }
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+          $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+          $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          $shotPath = Join-Path $env:GITHUB_WORKSPACE "studio-event-shot.png"
+          $bmp.Save($shotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+          $gfx.Dispose(); $bmp.Dispose()
+          Write-Host "SCREENSHOT: $shotPath $((Get-Item $shotPath).Length) byte"
+          $startEv.Dispose(); $readyEv.Dispose(); $showEv.Dispose()
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "DIAG-EVENT SELESAI."
+
       - name: Diagnostik installer Studio (tanpa cookie)
         if: inputs.mode == 'diag'
         shell: pwsh
@@ -309,13 +344,13 @@ jobs:
           Stop-Process -Name RobloxStudioBeta -Force -ErrorAction SilentlyContinue
 
       - name: Install run-in-roblox via Foreman
-        if: inputs.mode != 'diag' && inputs.mode != 'diag-studio' && inputs.mode != 'diag-shot' && inputs.mode != 'diag-thread'
+        if: inputs.mode != 'diag' && inputs.mode != 'diag-studio' && inputs.mode != 'diag-shot' && inputs.mode != 'diag-thread' && inputs.mode != 'diag-event'
         uses: rojo-rbx/setup-foreman@v1.0.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run script in headless Studio
-        if: inputs.mode != 'diag' && inputs.mode != 'diag-studio' && inputs.mode != 'diag-shot' && inputs.mode != 'diag-thread'
+        if: inputs.mode != 'diag' && inputs.mode != 'diag-studio' && inputs.mode != 'diag-shot' && inputs.mode != 'diag-thread' && inputs.mode != 'diag-event'
         shell: pwsh
         timeout-minutes: 20
         run: |
@@ -371,6 +406,7 @@ jobs:
             place-ids.txt
             launcher-shot.png
             launcher-shot2.png
+            studio-event-shot.png
           retention-days: 7
 
   api-create:
