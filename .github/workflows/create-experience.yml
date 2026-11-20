@@ -241,6 +241,8 @@ jobs:
           $exe = Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $exe) { Write-Error "RobloxStudioBeta.exe tidak ditemukan — handler protokol tidak bisa didaftarkan"; exit 1 }
           Write-Host "Studio exe: $($exe.FullName)"
+          Invoke-WebRequest -Uri "http://setup.roblox.com/RobloxStudioLauncherBeta.exe" -OutFile "$env:TEMP\RobloxStudioLauncherBeta.exe"
+$launcher = "$env:TEMP\RobloxStudioLauncherBeta.exe"
           # Handler protokol roblox-studio:// TIDAK terdaftar di runner (diagnosa
           # Plan D 20 Nov: HKCR/HKCU/HKLM roblox-studio ketiganya tidak ada — itu
           # sebabnya redirect "Login via Browser" run 5 gagal 3x: Edge tidak pernah
@@ -254,7 +256,7 @@ jobs:
           New-ItemProperty -Path $protoPath -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
           $cmdPath = "$protoPath\shell\open\command"
           if (-not (Test-Path $cmdPath)) { New-Item -Path $cmdPath -Force | Out-Null }
-          Set-ItemProperty -Path $cmdPath -Name "(Default)" -Value "`"$($exe.FullName)`" `"%1`""
+          Set-ItemProperty -Path $cmdPath -Name "(Default)" -Value "`"$launcher`" `"%1`""
           Write-Host "Handler roblox-studio:// terdaftar."
           Get-ItemProperty -Path $protoPath | Format-List | Out-String | Write-Host
           Get-ItemProperty -Path $cmdPath | Format-List | Out-String | Write-Host
