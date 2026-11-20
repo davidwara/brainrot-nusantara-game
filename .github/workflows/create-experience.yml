@@ -227,14 +227,28 @@ jobs:
           Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { Write-Host "WIN: $($_.ProcessName) pid=$($_.Id) title='$($_.MainWindowTitle)'" }
           Add-Type -AssemblyName System.Drawing
           Add-Type -AssemblyName System.Windows.Forms
-          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
-          $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-          $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-          $shotPath = Join-Path $env:GITHUB_WORKSPACE "launcher-shot.png"
-          $bmp.Save($shotPath, [System.Drawing.Imaging.ImageFormat]::Png)
-          $gfx.Dispose(); $bmp.Dispose()
-          Write-Host "SCREENSHOT: $shotPath $((Get-Item $shotPath).Length) byte, $($bounds.Width)x$($bounds.Height)"
+          function Save-Shot([string]$name) {
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+            $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+            $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $shotPath = Join-Path $env:GITHUB_WORKSPACE $name
+            $bmp.Save($shotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+            $gfx.Dispose(); $bmp.Dispose()
+            Write-Host "SCREENSHOT: $shotPath $((Get-Item $shotPath).Length) byte, $($bounds.Width)x$($bounds.Height)"
+          }
+          Save-Shot "launcher-shot.png"
+          Write-Host "--- Dismiss dialog error (Enter) lalu tunggu 30 dtk ---"
+          $wshell = New-Object -ComObject WScript.Shell
+          $activated = $wshell.AppActivate("Roblox")
+          Write-Host "AppActivate Roblox: $activated"
+          Start-Sleep -Seconds 1
+          $wshell.SendKeys("{ENTER}")
+          Start-Sleep -Seconds 30
+          Get-Process Roblox* -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "PROC2: $($_.Name) pid=$($_.Id) cpu=$($_.CPU)s ws=$([math]::Round($_.WorkingSet64/1MB))MB title='$($_.MainWindowTitle)'" }
+          $studio = Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue
+          if ($studio) { Get-NetTCPConnection -OwningProcess $studio.Id -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "STUDIO-NET: $($_.RemoteAddress):$($_.RemotePort) $($_.State)" } }
+          Save-Shot "launcher-shot2.png"
           Stop-Process -Name RobloxStudioLauncherBeta -Force -ErrorAction SilentlyContinue
           Stop-Process -Name RobloxStudioBeta -Force -ErrorAction SilentlyContinue
           Write-Host "DIAG-SHOT SELESAI."
@@ -329,6 +343,7 @@ jobs:
             run.log
             place-ids.txt
             launcher-shot.png
+            launcher-shot2.png
           retention-days: 7
 
   api-create:
