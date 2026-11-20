@@ -1,9 +1,10 @@
 name: Diag Protocol — roblox-studio:// handler
 
-# Diagnosa Plan D (20 Nov 2026): apakah handler protokol roblox-studio://
-# terdaftar di runner windows-latest, apakah bisa dipicu (shell + exe
-# langsung + registrasi manual), dan apakah instalasi resmi Studio
-# mendaftarkannya.
+# Diagnosa Plan D v3 (20 Nov 2026): uji MEKANISME handler protokol
+# roblox-studio:// di runner windows-latest TANPA butuh Studio terinstall.
+# Handler didaftarkan manual mengarah ke script penerima yang mencatat URL
+# yang diterimanya ke file — membuktikan rantai registry -> shell ->
+# proses -> argumen URL bekerja atau tidak.
 # TIDAK login, TIDAK pakai secret apa pun, TIDAK membuat experience.
 # Hasil: log + screenshot, di-upload sebagai artifact.
 
@@ -16,146 +17,25 @@ permissions:
 jobs:
   diag-protocol:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 15
     steps:
-      - name: Cek registry handler SEBELUM install (baseline)
+      - name: Tes A — Start-Process roblox-studio:// TANPA handler (harapan: error)
         shell: pwsh
         run: |
-          Write-Host "=== BASELINE: handler roblox-studio SEBELUM install ==="
+          Write-Host "=== TES A: Start-Process 'roblox-studio://' tanpa handler ==="
           foreach ($p in @("HKCR:\roblox-studio", "HKCU:\Software\Classes\roblox-studio", "HKLM:\SOFTWARE\Classes\roblox-studio")) {
-            if (Test-Path $p) {
-              Write-Host "ADA: $p"
-              (Get-ItemProperty $p | Format-List | Out-String).Trim() | Write-Host
-              $cmd = Get-ItemProperty "$p\shell\open\command" -ErrorAction SilentlyContinue
-              if ($cmd) { Write-Host "COMMAND: $($cmd.'(default)')" } else { Write-Host "COMMAND: (tidak ada subkey shell\open\command)" }
-            } else {
-              Write-Host "TIDAK ADA: $p"
-            }
+            if (Test-Path $p) { Write-Host "ADA: $p" } else { Write-Host "TIDAK ADA: $p" }
           }
-          Write-Host "=== Kebijakan Edge terkait protokol eksternal ==="
-          foreach ($p in @("HKLM:\SOFTWARE\Policies\Microsoft\Edge", "HKCU:\SOFTWARE\Policies\Microsoft\Edge")) {
-            if (Test-Path $p) { (Get-ItemProperty $p | Format-List | Out-String).Trim() | Write-Host } else { Write-Host "TIDAK ADA: $p" }
-          }
-          Write-Host "BASELINE SELESAI."
-
-      - name: Probe cepat — endpoint zip Studio (dokumentasi saja, tidak gagalkan job)
-        shell: pwsh
-        run: |
-          Write-Host "=== PROBE: versionStudio via http (https terbukti empty-reply) ==="
-          try {
-            $v = (Invoke-WebRequest -Uri "http://setup.roblox.com/versionStudio" -UseBasicParsing -TimeoutSec 20).Content.Trim()
-            Write-Host "STUDIO VERSION: $v"
-            $zipUrl = "http://setup.roblox.com/$v-RobloxStudio.zip"
-            Write-Host "ZIP URL: $zipUrl"
-            try {
-              $r = Invoke-WebRequest -Uri $zipUrl -OutFile "$env:RUNNER_TEMP\probe.zip" -UseBasicParsing -TimeoutSec 60
-              Write-Host "ZIP PROBE: HTTP $($r.StatusCode), size $((Get-Item "$env:RUNNER_TEMP\probe.zip").Length)"
-            } catch {
-              Write-Host "ZIP PROBE GAGAL: $($_.Exception.Message)"
-            }
-          } catch {
-            Write-Host "VERSION PROBE GAGAL: $($_.Exception.Message)"
-          }
-          Write-Host "PROBE SELESAI (lanjut ke instalasi resmi)."
-
-      - name: Install Studio resmi via winget (fallback launcher bila gagal)
-        shell: pwsh
-        timeout-minutes: 20
-        run: |
-          $exe = $null
-          Write-Host "=== WINGET: install Roblox.RobloxStudio ==="
-          try {
-            winget --version
-            winget install --id Roblox.RobloxStudio -e --accept-source-agreements --accept-package-agreements --silent
-            Write-Host "WINGET exit: $LASTEXITCODE"
-          } catch {
-            Write-Host "WINGET GAGAL: $($_.Exception.Message)"
-          }
-          $exe = Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $exe) {
-            Write-Host "EXE belum ada setelah winget — FALLBACK launcher, polling sampai 8 menit"
-            Invoke-WebRequest -Uri "http://setup.roblox.com/RobloxStudioLauncherBeta.exe" -OutFile "$env:RUNNER_TEMP\RobloxStudioLauncherBeta.exe" -UseBasicParsing
-            $lp = Start-Process -FilePath "$env:RUNNER_TEMP\RobloxStudioLauncherBeta.exe" -PassThru
-            Write-Host "LAUNCHER pid=$($lp.Id)"
-            for ($i = 0; $i -lt 16; $i++) {
-              Start-Sleep -Seconds 30
-              $exe = Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($exe) { Write-Host "EXE KETEMU setelah $($i * 30 + 30) dtk polling launcher"; break }
-              $lpAlive = Get-Process -Id $lp.Id -ErrorAction SilentlyContinue
-              Write-Host "poll $($i + 1)/16: exe belum ada, launcher hidup=$($null -ne $lpAlive)"
-            }
-          }
-          if (-not $exe) { Write-Error "RobloxStudioBeta.exe TIDAK ditemukan (winget maupun launcher)"; exit 1 }
-          Write-Host "EXE: $($exe.FullName)"
-          "STUDIO_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Cek registry handler SETELAH install resmi
-        shell: pwsh
-        run: |
-          Write-Host "=== Handler SETELAH install resmi, SEBELUM exe dijalankan ==="
-          foreach ($p in @("HKCR:\roblox-studio", "HKCU:\Software\Classes\roblox-studio", "HKLM:\SOFTWARE\Classes\roblox-studio")) {
-            if (Test-Path $p) {
-              Write-Host "ADA: $p"
-              $cmd = Get-ItemProperty "$p\shell\open\command" -ErrorAction SilentlyContinue
-              if ($cmd) { Write-Host "COMMAND: $($cmd.'(default)')" } else { Write-Host "COMMAND: (tidak ada)" }
-            } else {
-              Write-Host "TIDAK ADA: $p"
-            }
-          }
-
-      - name: Jalankan Studio sekali + cek registry lagi
-        shell: pwsh
-        run: |
-          Write-Host "=== Jalankan RobloxStudioBeta.exe sekali (tanpa argumen), tunggu 45 dtk ==="
-          $p = Start-Process -FilePath $env:STUDIO_EXE -PassThru
-          Write-Host "STUDIO pid=$($p.Id)"
-          Start-Sleep -Seconds 45
-          $running = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
-          if ($running) { Write-Host "STUDIO MASIH JALAN: title='$($running.MainWindowTitle)'" } else { Write-Host "STUDIO SUDAH KELUAR" }
-          Write-Host "=== Handler SETELAH exe dijalankan sekali ==="
-          foreach ($path in @("HKCR:\roblox-studio", "HKCU:\Software\Classes\roblox-studio", "HKLM:\SOFTWARE\Classes\roblox-studio")) {
-            if (Test-Path $path) {
-              Write-Host "ADA: $path"
-              $cmd = Get-ItemProperty "$path\shell\open\command" -ErrorAction SilentlyContinue
-              if ($cmd) { Write-Host "COMMAND: $($cmd.'(default)')" } else { Write-Host "COMMAND: (tidak ada)" }
-            } else {
-              Write-Host "TIDAK ADA: $path"
-            }
-          }
-          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-          Start-Sleep -Seconds 3
-
-      - name: Tes 1 — Start-Process roblox-studio:// (handler apa adanya)
-        shell: pwsh
-        run: |
-          Add-Type -AssemblyName System.Drawing
-          Add-Type -AssemblyName System.Windows.Forms
-          function Save-Shot([string]$name) {
-            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-            $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
-            $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-            $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-            $shotPath = Join-Path $env:GITHUB_WORKSPACE $name
-            $bmp.Save($shotPath, [System.Drawing.Imaging.ImageFormat]::Png)
-            $gfx.Dispose(); $bmp.Dispose()
-            Write-Host "SCREENSHOT: $name $((Get-Item $shotPath).Length) byte"
-          }
-          Write-Host "=== TES 1: Start-Process 'roblox-studio://' ==="
           try {
             Start-Process "roblox-studio://"
-            Write-Host "TES1: Start-Process TIDAK error (shell menerima URL)"
+            Write-Host "TES A: Start-Process TIDAK error (tidak terduga tanpa handler)"
           } catch {
-            Write-Host "TES1: Start-Process ERROR: $($_.Exception.Message)"
+            Write-Host "TES A: Start-Process ERROR (sesuai harapan tanpa handler): $($_.Exception.Message)"
           }
-          Start-Sleep -Seconds 20
-          $after = Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue
-          if ($after) { $after | ForEach-Object { Write-Host "TES1: RobloxStudioBeta JALAN pid=$($_.Id) title='$($_.MainWindowTitle)'" } } else { Write-Host "TES1: RobloxStudioBeta TIDAK jalan setelah 20 dtk" }
-          Write-Host "--- Semua jendela terlihat ---"
-          Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { Write-Host "WIN: $($_.ProcessName) pid=$($_.Id) title='$($_.MainWindowTitle)'" }
-          Save-Shot "diag-protocol-tes1.png"
-          Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 5
+          Write-Host "TES A SELESAI."
 
-      - name: Tes 2 — Daftarkan handler manual lalu picu lagi
+      - name: Tes B — Daftarkan handler manual ke script penerima, lalu picu
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Drawing
@@ -170,44 +50,70 @@ jobs:
             $gfx.Dispose(); $bmp.Dispose()
             Write-Host "SCREENSHOT: $name $((Get-Item $shotPath).Length) byte"
           }
-          Write-Host "=== TES 2: registrasi manual HKCU\Software\Classes\roblox-studio ==="
-          $exe = $env:STUDIO_EXE
+          Write-Host "=== TES B: buat script penerima + daftarkan handler manual ==="
+          $receiver = Join-Path $env:RUNNER_TEMP "protocol-receiver.ps1"
+          $logFile = Join-Path $env:RUNNER_TEMP "protocol-received.txt"
+          @"
+          param([string]`$url)
+          "`$(Get-Date -Format o) URL=`$url" | Out-File -FilePath "$logFile" -Append -Encoding utf8
+          "@ | Out-File -FilePath $receiver -Encoding utf8
+          Write-Host "RECEIVER: $receiver"
+          Write-Host "LOGFILE: $logFile"
+          $pwsh = (Get-Command pwsh).Source
+          Write-Host "PWSH: $pwsh"
           $base = "HKCU:\Software\Classes\roblox-studio"
           New-Item -Path $base -Force | Out-Null
           Set-ItemProperty -Path $base -Name "(default)" -Value "URL:Roblox Studio"
           New-ItemProperty -Path $base -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
           New-Item -Path "$base\shell\open\command" -Force | Out-Null
-          Set-ItemProperty -Path "$base\shell\open\command" -Name "(default)" -Value "`"$exe`" `"%1`""
+          $cmdValue = "`"$pwsh`" -NoProfile -ExecutionPolicy Bypass -File `"$receiver`" `"%1`""
+          Set-ItemProperty -Path "$base\shell\open\command" -Name "(default)" -Value $cmdValue
           $check = Get-ItemProperty "$base\shell\open\command"
           Write-Host "TERDAFTAR: $($check.'(default)')"
-          Write-Host "--- Tes 2a: Start-Process 'roblox-studio://' setelah registrasi manual ---"
+          Write-Host "--- Picu: Start-Process 'roblox-studio://diag-ticket-123' ---"
           try {
-            Start-Process "roblox-studio://"
-            Write-Host "TES2a: Start-Process TIDAK error"
+            Start-Process "roblox-studio://diag-ticket-123"
+            Write-Host "TES B: Start-Process TIDAK error"
           } catch {
-            Write-Host "TES2a: Start-Process ERROR: $($_.Exception.Message)"
+            Write-Host "TES B: Start-Process ERROR: $($_.Exception.Message)"
           }
-          Start-Sleep -Seconds 20
-          $after = Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue
-          if ($after) { $after | ForEach-Object { Write-Host "TES2a: RobloxStudioBeta JALAN pid=$($_.Id) title='$($_.MainWindowTitle)'" } } else { Write-Host "TES2a: RobloxStudioBeta TIDAK jalan setelah 20 dtk" }
-          Save-Shot "diag-protocol-tes2a.png"
-          Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-          Start-Sleep -Seconds 2
-          Write-Host "--- Tes 2b: jalankan exe langsung dengan URL protokol sebagai argumen ---"
-          $p = Start-Process -FilePath $exe -ArgumentList "roblox-studio://" -PassThru
-          Write-Host "TES2b: exe pid=$($p.Id)"
-          Start-Sleep -Seconds 20
-          $running = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
-          if ($running) { Write-Host "TES2b: MASIH JALAN title='$($running.MainWindowTitle)'" } else { Write-Host "TES2b: SUDAH KELUAR" }
-          Save-Shot "diag-protocol-tes2b.png"
-          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-          Write-Host "TES 2 SELESAI."
+          Start-Sleep -Seconds 15
+          if (Test-Path $logFile) {
+            Write-Host "TES B: LOG FILE ADA — isi:"
+            Get-Content $logFile | ForEach-Object { Write-Host "LOG: $_" }
+          } else {
+            Write-Host "TES B: LOG FILE TIDAK ADA — receiver tidak pernah jalan"
+          }
+          Save-Shot "diag-protocol-tesB.png"
+          Write-Host "TES B SELESAI."
+
+      - name: Tes C — Picu lagi dengan URL bertiket realistis (oauth authorize)
+        shell: pwsh
+        run: |
+          $logFile = Join-Path $env:RUNNER_TEMP "protocol-received.txt"
+          Write-Host "=== TES C: Start-Process URL bertiket realistis ==="
+          $ticketUrl = "roblox-studio://authorize?ticket=DIAGTEST123&returnUrl=https%3A%2F%2Fapis.roblox.com%2Foauth%2Fv1%2Fauthorize"
+          Write-Host "URL: $ticketUrl"
+          try {
+            Start-Process $ticketUrl
+            Write-Host "TES C: Start-Process TIDAK error"
+          } catch {
+            Write-Host "TES C: Start-Process ERROR: $($_.Exception.Message)"
+          }
+          Start-Sleep -Seconds 15
+          if (Test-Path $logFile) {
+            Write-Host "TES C: isi log file:"
+            Get-Content $logFile | ForEach-Object { Write-Host "LOG: $_" }
+          } else {
+            Write-Host "TES C: LOG FILE TIDAK ADA"
+          }
+          Write-Host "TES C SELESAI."
 
       - name: Upload artifact diagnosa
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diag-protocol
+          name: diag-protocol-v3
           path: |
             diag-protocol-*.png
           if-no-files-found: warn
