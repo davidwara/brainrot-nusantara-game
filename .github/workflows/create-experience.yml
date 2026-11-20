@@ -105,6 +105,13 @@ jobs:
           if (-not (Test-Path $pluginsDir)) { New-Item -Path $pluginsDir -ItemType Directory -Force | Out-Null }
           $autoSaves = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "ROBLOX\AutoSaves"
           if (Test-Path $autoSaves) { Remove-Item $autoSaves -Recurse -Force }
+          $settingsTemplate = Join-Path $env:GITHUB_WORKSPACE "ci\GlobalSettings_13.xml"
+          if (-not (Test-Path $settingsTemplate)) { Write-Error "ci/GlobalSettings_13.xml tidak ditemukan di checkout"; exit 1 }
+          $userDir = $env:USERPROFILE.Replace("\", "/")
+          $settingsContent = (Get-Content $settingsTemplate -Raw).Replace("%UserProfile%", $userDir)
+          $settingsDest = Join-Path $env:LOCALAPPDATA "Roblox\GlobalSettings_13.xml"
+          Set-Content -Path $settingsDest -Value $settingsContent -Encoding utf8
+          Write-Host "GlobalSettings_13.xml ditulis ke $settingsDest"
           $studioDir = Split-Path $studioExe.FullName -Parent
           $studioDir >> $env:GITHUB_PATH
           Write-Host "Studio dari zip SIAP."
