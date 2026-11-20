@@ -1,1 +1,1 @@
-4 TYPEUSER
+0 NONE
