@@ -291,7 +291,7 @@ jobs:
           Start-Sleep -Seconds 75
           $statusFile = Join-Path $env:GITHUB_WORKSPACE "qr-auth-status.txt"
           "authenticated=false" | Out-File -FilePath $statusFile -Encoding utf8
-          $deadline = (Get-Date).AddMinutes(22)
+          $deadline = (Get-Date).AddMinutes(45)
           $shotIndex = 0
           $lastSeq = 0
           $authenticated = $false
@@ -421,7 +421,7 @@ jobs:
           Start-Sleep -Seconds 75
           $statusFile = Join-Path $env:GITHUB_WORKSPACE "password-auth-status.txt"
           "authenticated=false" | Out-File -FilePath $statusFile -Encoding utf8
-          $deadline = (Get-Date).AddMinutes(22)
+          $deadline = (Get-Date).AddMinutes(45)
           $shotIndex = 0
           $lastSeq = 0
           $authenticated = $false
