@@ -72,7 +72,7 @@ jobs:
   create-experience:
     if: inputs.mode != 'api-create'
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     # qr-login butuh push branch qr-login-shots (screenshot QR live) — override
     # workflow-level contents:read hanya untuk job ini.
     permissions:
@@ -367,7 +367,7 @@ jobs:
         id: password-login
         if: inputs.mode == 'password-login'
         shell: pwsh
-        timeout-minutes: 30
+        timeout-minutes: 50
         env:
           ROBLOX_PASSWORD: ${{ secrets.ROBLOX_PASSWORD }}
         run: |
