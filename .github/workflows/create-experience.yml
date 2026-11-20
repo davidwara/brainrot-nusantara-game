@@ -193,12 +193,21 @@ jobs:
           Dump-Studio -label "Test B (dengan place, CWD=studioDir, 60 dtk)"
           Stop-Process -Name RobloxStudioBeta -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 5
-          Write-Host "--- Test C: launcher (120 dtk) ---"
+          Write-Host "--- Test C: launcher (10x60 dtk, pantau progres + koneksi) ---"
           Invoke-WebRequest -Uri "http://setup.roblox.com/RobloxStudioLauncherBeta.exe" -OutFile RobloxStudioLauncherBeta.exe
           $procC = Start-Process -FilePath ".\RobloxStudioLauncherBeta.exe" -PassThru
-          Start-Sleep -Seconds 120
-          Dump-Studio -label "Test C (launcher, 120 dtk)"
-          Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "VERSIONS: $($_.Name)" }
+          for ($i = 1; $i -le 10; $i++) {
+            Start-Sleep -Seconds 60
+            Write-Host "=== Test C menit $i ==="
+            Get-Process Roblox* -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "PROC: $($_.Name) pid=$($_.Id) cpu=$($_.CPU)s ws=$([math]::Round($_.WorkingSet64/1MB))MB title='$($_.MainWindowTitle)'" }
+            Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "VERSIONS: $($_.Name)" }
+            $launcherPids = (Get-Process RobloxStudioLauncherBeta -ErrorAction SilentlyContinue).Id
+            foreach ($lp in $launcherPids) {
+              Get-NetTCPConnection -OwningProcess $lp -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "NET: pid=$lp $($_.RemoteAddress):$($_.RemotePort) $($_.State)" }
+            }
+            $studio = Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue
+            if ($studio) { Write-Host "STUDIO MUNCUL: pid=$($studio.Id) cpu=$($studio.CPU)s"; break }
+          }
           Stop-Process -Name RobloxStudioLauncherBeta -Force -ErrorAction SilentlyContinue
           Stop-Process -Name RobloxStudioBeta -Force -ErrorAction SilentlyContinue
           Write-Host "--- Event log Application (15 menit terakhir, Roblox/Error) ---"
