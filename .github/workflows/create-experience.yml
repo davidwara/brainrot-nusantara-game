@@ -68,7 +68,7 @@ jobs:
           Write-Host "ROBLOSECURITY secret terisi (nilai tidak dicetak)."
 
       - name: Install Roblox Studio
-        if: inputs.mode != 'diag' && inputs.mode != 'studio-zip'
+        if: inputs.mode != 'diag' && inputs.mode != 'studio-zip' && inputs.mode != 'diag-studio'
         uses: OrbitalOwen/roblox-win-installer-action@1.1
         timeout-minutes: 20
         with:
