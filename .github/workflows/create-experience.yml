@@ -124,6 +124,19 @@ jobs:
           foreach ($f in $must) { if (-not (Test-Path (Join-Path $dest $f))) { Write-Error "File kunci hilang: $f"; exit 1 } }
           if (-not (Test-Path (Join-Path $dest "ssl\cacert.pem"))) { Write-Error "File kunci hilang: ssl\cacert.pem"; exit 1 }
           Write-Host "Verifikasi file kunci: LENGKAP"
+          # AppSettings.xml TIDAK ada di package manapun — launcher resmi menulisnya
+          # sendiri (writeAppSettings). Tanpa file ini Studio gagal start:
+          # "'AppSettings.xml' not found. BaseURL is empty." Template diekstrak
+          # dari string launcher resmi (RobloxStudioLauncherBeta.exe).
+          $appSettingsLines = @(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Settings>'
+            "`t<ContentFolder>content</ContentFolder>"
+            "`t<BaseUrl>http://www.roblox.com</BaseUrl>"
+            '</Settings>'
+          )
+          $appSettingsLines -join "`n" | Set-Content -Path (Join-Path $dest "AppSettings.xml") -Encoding utf8
+          Write-Host "AppSettings.xml ditulis ke $dest"
           $studioExe = Get-ChildItem $dest -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $studioExe) { Write-Error "RobloxStudioBeta.exe tidak ditemukan setelah extract"; exit 1 }
           Write-Host "Studio exe: $($studioExe.FullName)"
