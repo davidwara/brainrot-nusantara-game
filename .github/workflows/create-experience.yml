@@ -32,6 +32,9 @@ name: Plan C — Create Experience (headless Studio)
 #            "<seq> TYPEUSER" / "<seq> TYPEPASSWORD"). CLICKRAW = klik mouse
 #            TANPA AppActivate Studio, untuk menggerakkan Edge setelah klik
 #            "Login via Browser" (Studio gagal 3x di handoff Continue -> sesi).
+#            Handler protokol roblox-studio:// didaftarkan manual ke exe Studio
+#            setelah install (diagnosa Plan D 20 Nov: handler TIDAK terdaftar di
+#            runner — itu sebabnya redirect browser run 5 gagal 3x).
 #            TYPEPASSWORD mengetik secret ROBLOX_PASSWORD
 #            langsung dari env — NILAI TIDAK PERNAH ditulis ke log/file/cmd.txt.
 #            Kalau Roblox minta verifikasi (email/kode) karena IP data center,
@@ -230,6 +233,31 @@ jobs:
           $studioDir = Split-Path $studioExe.FullName -Parent
           $studioDir >> $env:GITHUB_PATH
           Write-Host "Studio dari zip SIAP."
+
+      - name: Daftarkan handler protokol roblox-studio:// (password-login)
+        if: inputs.mode == 'password-login'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -Recurse -Filter RobloxStudioBeta.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { Write-Error "RobloxStudioBeta.exe tidak ditemukan — handler protokol tidak bisa didaftarkan"; exit 1 }
+          Write-Host "Studio exe: $($exe.FullName)"
+          # Handler protokol roblox-studio:// TIDAK terdaftar di runner (diagnosa
+          # Plan D 20 Nov: HKCR/HKCU/HKLM roblox-studio ketiganya tidak ada — itu
+          # sebabnya redirect "Login via Browser" run 5 gagal 3x: Edge tidak pernah
+          # memunculkan prompt "Open Roblox Studio?" dan halaman redirect berputar
+          # tanpa selesai). Daftarkan manual ke exe Studio (meniru installer resmi).
+          # Tes diagnosa membuktikan rantai registry -> shell -> proses -> argumen
+          # URL bekerja 100% (handler manual ke script penerima menerima URL utuh).
+          $protoPath = "HKCU:\Software\Classes\roblox-studio"
+          if (-not (Test-Path $protoPath)) { New-Item -Path $protoPath -Force | Out-Null }
+          Set-ItemProperty -Path $protoPath -Name "(Default)" -Value "URL:Roblox Studio"
+          New-ItemProperty -Path $protoPath -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
+          $cmdPath = "$protoPath\shell\open\command"
+          if (-not (Test-Path $cmdPath)) { New-Item -Path $cmdPath -Force | Out-Null }
+          Set-ItemProperty -Path $cmdPath -Name "(Default)" -Value "`"$($exe.FullName)`" `"%1`""
+          Write-Host "Handler roblox-studio:// terdaftar."
+          Get-ItemProperty -Path $protoPath | Format-List | Out-String | Write-Host
+          Get-ItemProperty -Path $cmdPath | Format-List | Out-String | Write-Host
 
       - name: Cek cookie valid
         if: inputs.mode == 'studio-zip' || inputs.mode == 'diag-studio' || inputs.mode == 'diag-shot' || inputs.mode == 'diag-thread' || inputs.mode == 'diag-event'
