@@ -19,7 +19,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
-      - name: Tes A — Start-Process roblox-studio:// TANPA handler (harapan: error)
+      - name: Tes A — Start-Process roblox-studio tanpa handler
         shell: pwsh
         run: |
           Write-Host "=== TES A: Start-Process 'roblox-studio://' tanpa handler ==="
