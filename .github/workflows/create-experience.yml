@@ -242,7 +242,7 @@ jobs:
           if (-not $exe) { Write-Error "RobloxStudioBeta.exe tidak ditemukan — handler protokol tidak bisa didaftarkan"; exit 1 }
           Write-Host "Studio exe: $($exe.FullName)"
           Invoke-WebRequest -Uri "http://setup.roblox.com/RobloxStudioLauncherBeta.exe" -OutFile "$env:TEMP\RobloxStudioLauncherBeta.exe"
-$launcher = "$env:TEMP\RobloxStudioLauncherBeta.exe"
+          $launcher = "$env:TEMP\RobloxStudioLauncherBeta.exe"
           # Handler protokol roblox-studio:// TIDAK terdaftar di runner (diagnosa
           # Plan D 20 Nov: HKCR/HKCU/HKLM roblox-studio ketiganya tidak ada — itu
           # sebabnya redirect "Login via Browser" run 5 gagal 3x: Edge tidak pernah
